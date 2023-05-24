@@ -1,0 +1,92 @@
+version: "3"
+services:
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    hostname: grafana
+    user: "472"
+    restart: unless-stopped
+    networks:
+      - traefik
+    env_file:
+      - ./grafana/.env
+    volumes:
+      # /!\ To be modified depending on your needs /!\
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.domain.tld`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencryptresolver"
+
+  cadvisor:
+    container_name: cadvisor
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    hostname: cadvisor
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - traefik
+    expose:
+      - 8080
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro
+
+  node-exporter:
+    container_name: node-exporter
+    image: prom/node-exporter:latest
+    hostname: exporter
+    restart: unless-stopped
+    networks:
+      - traefik
+    expose:
+      - 9100
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host
+      - --collector.filesystem.ignored-mount-points
+      - ^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /:/host:ro,rslave
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    hostname: prometheus
+    user: "nobody"
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - traefik
+    expose:
+      - 9090
+    volumes:
+      # /!\ To be modified depending on your needs /!\
+      - ./prometheus/data:/prometheus
+      - ./prometheus:/etc/prometheus/
+    depends_on:
+      - cadvisor
+      - node-exporter
+    links:
+      - cadvisor:cadvisor
+      - node-exporter:node-exporter
+networks:
+  traefik:
+    external: true
